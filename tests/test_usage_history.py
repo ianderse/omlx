@@ -481,3 +481,164 @@ def test_server_metrics_respects_disabled_recorder(tmp_path):
         assert metrics.usage_history.query()["totals"]["requests"] == 1
     finally:
         metrics.close()
+
+
+# Per-client history (opt-in)
+
+EDITOR = ("sub_key", "Editor")
+LAPTOP = ("ip", "192.168.1.20")
+
+
+def _client_rows(history, **query):
+    return {
+        (row["client_kind"], row["client_id"]): row
+        for row in history.query(**query)["clients"]
+    }
+
+
+def test_client_attribution_off_by_default(history):
+    assert history.by_client is False
+    record(history, client=EDITOR)
+    assert history.flush()
+    result = history.query()
+    assert result["by_client"] is False
+    assert result["clients"] == []
+    assert result["totals"]["requests"] == 1
+    with sqlite3.connect(history.path) as db:
+        assert db.execute("SELECT count(*) FROM client_usage_hourly").fetchone()[0] == 0
+
+
+def test_client_aggregation_model_filter_and_order(history):
+    history.set_by_client(True)
+    record(history, "model-a", client=EDITOR)
+    record(history, "model-b", client=EDITOR)
+    record(history, "model-a", client=LAPTOP, completion_tokens=500)
+    record(history, "model-a")  # no request context: model totals only
+    assert history.flush()
+    result = history.query()
+    assert result["by_client"] is True
+    assert [(c["client_kind"], c["client_id"]) for c in result["clients"]] == [
+        LAPTOP,
+        EDITOR,
+    ]
+    rows = _client_rows(history)
+    assert rows[EDITOR]["requests"] == 2
+    assert rows[EDITOR]["total_tokens"] == 240
+    assert rows[EDITOR]["generation_tps"] == 10.0
+    assert result["totals"]["requests"] == 4
+    filtered = _client_rows(history, model="model-b")
+    assert list(filtered) == [EDITOR]
+    assert filtered[EDITOR]["requests"] == 1
+
+
+def test_client_rows_kept_after_tracking_turned_off(history):
+    history.set_by_client(True)
+    record(history, client=EDITOR)
+    assert history.flush()
+    history.set_by_client(False)
+    record(history, client=EDITOR)
+    assert history.flush()
+    result = history.query()
+    assert result["by_client"] is False
+    assert _client_rows(history)[EDITOR]["requests"] == 1
+    assert result["totals"]["requests"] == 2
+
+
+@pytest.mark.parametrize(
+    "client",
+    [("api_key", "x"), ("ip", 7), ("ip", "x" * 257), ("sub_key", "x" * 300)],
+)
+def test_invalid_client_label_ignored_but_model_counted(history, client):
+    history.set_by_client(True)
+    record(history, client=client)
+    assert history.flush()
+    assert history.query()["clients"] == []
+    assert history.query()["totals"]["requests"] == 1
+
+
+def test_client_buffer_bounded_separately(history, monkeypatch):
+    monkeypatch.setattr("omlx.usage_history._MAX_PENDING_BUCKETS", 2)
+    history.set_by_client(True)
+    for i in range(5):
+        record(history, client=("ip", f"10.0.0.{i}"))
+    # One model bucket, two client buckets: overflowing clients never drops models.
+    assert len(history._pending) == 1
+    assert len(history._pending_clients) == 2
+    assert history.dropped_requests == 0
+    assert history.dropped_client_requests == 3
+
+
+def test_client_batch_retried_after_failed_flush(history):
+    history.set_by_client(True)
+    record(history, client=EDITOR)
+    with patch.object(
+        history, "_connect", side_effect=sqlite3.OperationalError("locked")
+    ):
+        assert not history.flush()
+        record(history, client=EDITOR)
+    assert history.flush()
+    assert _client_rows(history)[EDITOR]["requests"] == 2
+
+
+def test_client_retention(history):
+    history.set_by_client(True)
+    now = time.time()
+    record(history, timestamp=now - 401 * 86400, client=EDITOR)
+    record(history, timestamp=now, client=EDITOR)
+    assert history.flush()
+    with sqlite3.connect(history.path) as db:
+        assert (
+            db.execute("SELECT sum(requests) FROM client_usage_hourly").fetchone()[0]
+            == 1
+        )
+
+
+def test_client_label_is_only_data(history):
+    history.set_by_client(True)
+    label = "x'); DROP TABLE model_usage_hourly; --"
+    record(history, client=("sub_key", label))
+    assert history.flush()
+    assert _client_rows(history)[("sub_key", label)]["requests"] == 1
+    assert history.query()["totals"]["requests"] == 1
+
+
+def test_existing_v1_database_gains_client_table_without_version_bump(tmp_path):
+    path = tmp_path / "usage.sqlite3"
+    first = UsageHistory(path)
+    record(first)
+    first.close()
+    with sqlite3.connect(path) as db:
+        db.execute("DROP TABLE client_usage_hourly")
+    # A file from an older build: queries degrade to no clients until the
+    # writer adds the table, and model history is untouched.
+    reader = UsageHistory(path, enabled=False)
+    reader.enabled = True
+    assert reader.query()["clients"] == []
+    assert reader.query()["totals"]["requests"] == 1
+    reader.close()
+    upgraded = UsageHistory(path, by_client=True)
+    record(upgraded, client=EDITOR)
+    assert upgraded.flush()
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert upgraded.query()["totals"]["requests"] == 2
+    assert _client_rows(upgraded)[EDITOR]["requests"] == 1
+    upgraded.close()
+
+
+def test_server_metrics_passes_request_client(tmp_path):
+    from omlx import client_identity
+
+    metrics = ServerMetrics()
+    metrics.usage_history = UsageHistory(tmp_path / "usage.sqlite3", by_client=True)
+    token = client_identity._current.set(client_identity._ClientSlot(*LAPTOP))
+    try:
+        metrics.record_request_complete(10, 2, 0, 0.1, 0.1, "model-a", 0.2)
+    finally:
+        client_identity._current.reset(token)
+    metrics.record_request_complete(10, 2, 0, 0.1, 0.1, "model-a", 0.2)
+    metrics.usage_history.flush()
+    rows = _client_rows(metrics.usage_history)
+    assert list(rows) == [LAPTOP]
+    assert rows[LAPTOP]["requests"] == 1
+    metrics.close()

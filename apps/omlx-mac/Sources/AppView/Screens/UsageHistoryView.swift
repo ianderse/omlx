@@ -99,6 +99,9 @@ struct UsageHistoryView: View {
                         }
                     }
                 }
+                if let clients = data.clients, !clients.isEmpty {
+                    clientsSection(clients, tracking: data.byClient ?? false)
+                }
                 heatmap(data.heatmap)
             } else if error == nil {
                 ProgressView().padding(.horizontal, 18)
@@ -171,6 +174,68 @@ struct UsageHistoryView: View {
         .frame(maxWidth: .infinity, alignment: .leading).padding(12)
         .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
         .help(value.formatted())
+    }
+
+    private func clientsSection(_ clients: [UsageHistoryDTO.UsageClientDTO], tracking: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(String(localized: "status.usage.clients.title",
+                        defaultValue: "Clients",
+                        comment: "Heading above the per-client usage breakdown"))
+                .font(.omlxText(13))
+                .padding(.horizontal, 18)
+            if !tracking {
+                Text(String(localized: "status.usage.clients.paused",
+                            defaultValue: "Per-client tracking is off. Showing previously recorded clients.",
+                            comment: "Shown above recorded client rows when per-client tracking is switched off"))
+                    .font(.omlxText(11)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 18)
+            }
+            ListGroup {
+                ForEach(clients) { row in
+                    Row(label: clientLabel(row), sublabel: clientDetail(row)) {
+                        VStack(alignment: .trailing, spacing: 3) {
+                            Text(String(localized: "status.usage.row.tokens",
+                                        defaultValue: "\(compact(row.totalTokens)) tokens",
+                                        comment: "Per-model total token count; placeholder is a compact number"))
+                            Text(String(localized: "status.usage.row.requests_speed",
+                                        defaultValue: "\(row.requests) requests · \(speed(row.generationTps)) tok/s",
+                                        comment: "Per-model request count and output speed; placeholders are a count and a formatted tokens-per-second value"))
+                                .foregroundStyle(.secondary)
+                        }.font(.omlxMono(11))
+                    }
+                }
+            }
+        }
+    }
+
+    /// Sub key name, peer IP, or the main key (which has no name of its own).
+    private func clientLabel(_ row: UsageHistoryDTO.UsageClientDTO) -> String {
+        row.clientKind == "main_key"
+            ? String(localized: "status.usage.client.main_key",
+                     defaultValue: "Main API key",
+                     comment: "Client label for requests authenticated with the main API key")
+            : row.clientId
+    }
+
+    private func clientDetail(_ row: UsageHistoryDTO.UsageClientDTO) -> String {
+        let kind: String
+        switch row.clientKind {
+        case "sub_key":
+            kind = String(localized: "status.usage.client.sub_key",
+                          defaultValue: "Sub key",
+                          comment: "Client kind shown for requests attributed to a named API sub key")
+        case "ip":
+            kind = String(localized: "status.usage.client.ip",
+                          defaultValue: "IP address",
+                          comment: "Client kind shown for requests attributed to the peer IP address")
+        default:
+            kind = String(localized: "status.usage.client.main_key.kind",
+                          defaultValue: "API key",
+                          comment: "Client kind shown for requests authenticated with the main API key")
+        }
+        return String(localized: "status.usage.client.detail",
+                      defaultValue: "\(kind) · prompt \(compact(row.promptTokens)) · output \(compact(row.completionTokens)) · cached \(compact(row.cachedTokens))",
+                      comment: "Per-client breakdown sublabel; placeholders are the client kind and compact prompt, output, and cached token counts")
     }
 
     private func heatmap(_ days: [UsageHistoryDTO.UsageDayDTO]) -> some View {

@@ -52,5 +52,10 @@ function usageHistory() {
         },
         number(value) { return new Intl.NumberFormat(undefined, {notation: 'compact', maximumFractionDigits: 1}).format(value || 0); },
         speed(value) { return value == null ? '—' : value.toFixed(1); },
+        // Sub key name, peer IP, or the main key (which has no name of its own).
+        clientLabel(row) { return row.client_kind === 'main_key' ? window.t('usage.client_main_key') : row.client_id; },
+        clientKind(row) {
+            return row.client_kind === 'main_key' ? '' : window.t(row.client_kind === 'sub_key' ? 'usage.client_sub_key' : 'usage.client_ip');
+        },
     };
 }

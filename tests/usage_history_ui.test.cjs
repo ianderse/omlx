@@ -74,3 +74,13 @@ test('recording switched off shows the settings pointer, not the unavailable war
     assert.equal(view.data.totals.requests, 1);
     assert.equal(view.models[0], 'canonical model');
 });
+
+test('client rows label sub keys, IPs, and the unnamed main key', () => {
+    const view = component(async () => ({ok: true, json: async () => data}));
+    assert.equal(view.clientLabel({client_kind: 'sub_key', client_id: 'Editor'}), 'Editor');
+    assert.equal(view.clientKind({client_kind: 'sub_key', client_id: 'Editor'}), 'usage.client_sub_key');
+    assert.equal(view.clientLabel({client_kind: 'ip', client_id: '10.0.0.7'}), '10.0.0.7');
+    assert.equal(view.clientKind({client_kind: 'ip', client_id: '10.0.0.7'}), 'usage.client_ip');
+    assert.equal(view.clientLabel({client_kind: 'main_key', client_id: ''}), 'usage.client_main_key');
+    assert.equal(view.clientKind({client_kind: 'main_key', client_id: ''}), '');
+});
