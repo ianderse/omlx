@@ -29,7 +29,12 @@ USAGE_HISTORY_I18N_KEYS = {
     "usage.client",
     "usage.client_main_key",
     "usage.client_sub_key",
-    "usage.client_ip",
+    "usage.clients_all",
+    "usage.clients_by_key",
+    "usage.clients_by_ip",
+    "usage.client_key",
+    "usage.client_ip_address",
+    "usage.client_no_key",
     "usage.clients_paused",
 }
 
@@ -270,7 +275,9 @@ def test_usage_by_client_toggle_applies_at_runtime(client, tmp_path, monkeypatch
 
     from omlx import client_identity
 
-    token = client_identity._current.set(client_identity._ClientSlot("sub_key", "CLI"))
+    slot = client_identity._ClientSlot("10.0.0.5")
+    slot.key_kind, slot.key_label = "sub_key", "CLI"
+    token = client_identity._current.set(slot)
     try:
         metrics.record_request_complete(10, 5, 0, 0.1, 0.2, "canonical-model", 0.3)
     finally:
@@ -278,8 +285,13 @@ def test_usage_by_client_toggle_applies_at_runtime(client, tmp_path, monkeypatch
     metrics.usage_history.flush()
     data = client.get("/admin/api/usage").json()
     assert data["by_client"] is True
-    assert data["clients"][0]["client_kind"] == "sub_key"
-    assert data["clients"][0]["client_id"] == "CLI"
+    assert data["clients"][0]["key_kind"] == "sub_key"
+    assert data["clients"][0]["key_id"] == "CLI"
+    assert data["clients"][0]["client_ip"] == "10.0.0.5"
+    assert data["clients_by_key"][0]["key_id"] == "CLI"
+    assert data["clients_by_ip"] == [
+        {**data["clients_by_ip"][0], "client_ip": "10.0.0.5", "total_tokens": 15}
+    ]
     assert data["clients"][0]["total_tokens"] == 15
     # The key itself and request content never appear; only the label.
     assert "api_key" not in data["clients"][0]
@@ -293,7 +305,7 @@ def test_usage_by_client_toggle_applies_at_runtime(client, tmp_path, monkeypatch
     assert metrics.usage_history.by_client is False
     data = client.get("/admin/api/usage").json()
     assert data["by_client"] is False
-    assert data["clients"][0]["client_id"] == "CLI"
+    assert data["clients"][0]["key_id"] == "CLI"
 
 
 def test_dashboard_renders_usage_history_switch_and_disabled_notice(client):
@@ -310,7 +322,8 @@ def test_dashboard_renders_usage_history_switch_and_disabled_notice(client):
     assert "usage_history: this.globalSettings.usage.usage_history" in javascript
     assert "globalSettings.usage.usage_by_client" in html
     assert "Track usage per client" in html
-    assert 'x-text="clientLabel(row)"' in html
+    assert 'x-for="row in clientRows()"' in html
+    assert "usage.clients_by_ip" in html
     assert "usage_by_client: this.globalSettings.usage.usage_by_client" in javascript
 
 

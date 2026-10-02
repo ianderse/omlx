@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Which client made the current request, as a short label for usage history.
 
-A request is attributed to the API key that authenticated it (the main key or
-a named sub key), falling back to the peer IP when no key was checked. Only the
-label crosses into usage history; never the key itself or any request content.
+Each request carries two labels: the API key that authenticated it (the main
+key, a named sub key, or none when no key was checked) and its peer IP. Only
+these labels cross into usage history; never the key itself or request content.
 """
 
 import ipaddress
@@ -11,8 +11,8 @@ from contextvars import ContextVar
 
 MAIN_KEY = "main_key"
 SUB_KEY = "sub_key"
-IP = "ip"
-CLIENT_KINDS = (MAIN_KEY, SUB_KEY, IP)
+NO_KEY = "none"
+KEY_KINDS = (MAIN_KEY, SUB_KEY, NO_KEY)
 MAX_LABEL_LENGTH = 256
 
 
@@ -24,11 +24,12 @@ class _ClientSlot:
     copied context, such as streaming response bodies.
     """
 
-    __slots__ = ("kind", "label")
+    __slots__ = ("key_kind", "key_label", "ip")
 
-    def __init__(self, kind: str, label: str):
-        self.kind = kind
-        self.label = label
+    def __init__(self, ip: str):
+        self.key_kind = NO_KEY
+        self.key_label = ""
+        self.ip = ip
 
 
 _current: ContextVar[_ClientSlot | None] = ContextVar(
@@ -65,7 +66,7 @@ class ClientIdentityMiddleware:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
-        token = _current.set(_ClientSlot(IP, _peer_label(scope)))
+        token = _current.set(_ClientSlot(_peer_label(scope)))
         try:
             await self.app(scope, receive, send)
         finally:
@@ -76,11 +77,11 @@ def set_key_identity(kind: str, label: str) -> None:
     """Attribute the current request to the API key that authenticated it."""
     slot = _current.get()
     if slot is not None and kind in (MAIN_KEY, SUB_KEY):
-        slot.kind = kind
-        slot.label = label[:MAX_LABEL_LENGTH]
+        slot.key_kind = kind
+        slot.key_label = label[:MAX_LABEL_LENGTH]
 
 
-def current_client() -> tuple[str, str] | None:
-    """``(kind, label)`` for the current request, or None outside a request."""
+def current_client() -> tuple[str, str, str] | None:
+    """``(key_kind, key_label, ip)`` for the current request, or None outside one."""
     slot = _current.get()
-    return None if slot is None else (slot.kind, slot.label)
+    return None if slot is None else (slot.key_kind, slot.key_label, slot.ip)

@@ -27417,30 +27417,6 @@
         }
       }
     },
-    "status.usage.client.main_key.kind" : {
-      "comment" : "Client kind shown for requests authenticated with the main API key",
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "API key"
-          }
-        },
-        "ru" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "API-ключ"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "API 密钥"
-          }
-        }
-      }
-    },
     "status.usage.client.sub_key" : {
       "comment" : "Client kind shown for requests attributed to a named API sub key",
       "extractionState" : "manual",
@@ -27465,50 +27441,98 @@
         }
       }
     },
-    "status.usage.client.ip" : {
-      "comment" : "Client kind shown for requests attributed to the peer IP address",
+    "status.usage.clients.all" : {
+      "comment" : "Clients tab showing each API key and IP address pair",
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "IP address"
+            "value" : "All"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "IP-адрес"
+            "value" : "Все"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "IP 地址"
+            "value" : "全部"
           }
         }
       }
     },
-    "status.usage.client.detail" : {
-      "comment" : "Per-client breakdown sublabel; placeholders are the client kind and compact prompt, output, and cached token counts",
-      "extractionState" : "extracted_with_value",
+    "status.usage.clients.by_key" : {
+      "comment" : "Clients tab grouping usage by API key",
+      "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@ · prompt %2$@ · output %3$@ · cached %4$@"
+            "state" : "translated",
+            "value" : "By key"
           }
         },
         "ru" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ · промпт %2$@ · вывод %3$@ · кэш %4$@"
+            "value" : "По ключу"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%1$@ · 提示 %2$@ · 输出 %3$@ · 已缓存 %4$@"
+            "value" : "按密钥"
+          }
+        }
+      }
+    },
+    "status.usage.clients.by_ip" : {
+      "comment" : "Clients tab grouping usage by client IP address",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By IP"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "По IP"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按 IP"
+          }
+        }
+      }
+    },
+    "status.usage.client.no_key" : {
+      "comment" : "Client label for requests that were not authenticated with an API key",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No key"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Без ключа"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无密钥"
           }
         }
       }

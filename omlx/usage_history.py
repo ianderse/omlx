@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Local, bounded serving history. No request objects or content enter this module.
 
-Per-client history (opt-in) receives only a short label from
-``omlx.client_identity``: an API key's name or the peer IP, never the key itself.
+Per-client history (opt-in) receives only short labels from
+``omlx.client_identity``: an API key's name and the peer IP, never the key itself.
 """
 
 import logging
@@ -28,7 +28,7 @@ _FIELDS = (
     "request_seconds",
     "timed_requests",
 )
-_CLIENT_KINDS = ("main_key", "sub_key", "ip")
+_KEY_KINDS = ("main_key", "sub_key", "none")
 _MAX_CLIENT_LABEL = 256
 # Added without bumping user_version: older builds ignore the extra table, so
 # downgrading keeps model history readable instead of refusing the file.
@@ -36,8 +36,9 @@ _CLIENT_TABLE = """
     CREATE TABLE IF NOT EXISTS client_usage_hourly (
         timestamp_hour INTEGER NOT NULL,
         model_id TEXT NOT NULL,
-        client_kind TEXT NOT NULL,
-        client_id TEXT NOT NULL,
+        key_kind TEXT NOT NULL,
+        key_id TEXT NOT NULL,
+        client_ip TEXT NOT NULL,
         requests INTEGER NOT NULL,
         prompt_tokens INTEGER NOT NULL,
         completion_tokens INTEGER NOT NULL,
@@ -46,7 +47,7 @@ _CLIENT_TABLE = """
         generation_seconds REAL NOT NULL,
         request_seconds REAL NOT NULL,
         timed_requests INTEGER NOT NULL,
-        PRIMARY KEY (timestamp_hour, model_id, client_kind, client_id)
+        PRIMARY KEY (timestamp_hour, model_id, key_kind, key_id, client_ip)
     ) WITHOUT ROWID
 """
 
@@ -97,6 +98,10 @@ def _summary(values) -> dict:
     return result
 
 
+def _ranked(rows) -> list[dict]:
+    return sorted(rows, key=lambda item: item["total_tokens"], reverse=True)
+
+
 def _bounds(period: str, now: float) -> tuple[datetime, datetime]:
     today = datetime.fromtimestamp(now).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -130,7 +135,7 @@ class UsageHistory:
         self._flush_lock = threading.Lock()
         self._pending: dict[tuple[int, str], list] = {}
         # Separate bound: many distinct clients must not crowd out model totals.
-        self._pending_clients: dict[tuple[int, str, str, str], list] = {}
+        self._pending_clients: dict[tuple[int, str, str, str, str], list] = {}
         self._stop = threading.Event()
         self._closed = False
         self.available = False
@@ -230,7 +235,7 @@ class UsageHistory:
         generation_duration: float,
         request_duration: float | None = None,
         timestamp: float | None = None,
-        client: tuple[str, str] | None = None,
+        client: tuple[str, str, str] | None = None,
     ) -> None:
         # Validate only scalar counters. Never accept a request or arbitrary metadata.
         counts = (prompt_tokens, completion_tokens, cached_tokens)
@@ -260,14 +265,13 @@ class UsageHistory:
                 return
             if not self.by_client or client is None:
                 return
-            kind, label = client
-            if (
-                kind not in _CLIENT_KINDS
-                or not isinstance(label, str)
-                or len(label) > _MAX_CLIENT_LABEL
+            kind, label, ip = client
+            if kind not in _KEY_KINDS or any(
+                not isinstance(text, str) or len(text) > _MAX_CLIENT_LABEL
+                for text in (label, ip)
             ):
                 return
-            key = (self._bucket_hour, model_id, kind, label)
+            key = (self._bucket_hour, model_id, kind, label, ip)
             if not _add(self._pending_clients, key, list(values)):
                 self.dropped_client_requests += 1
 
@@ -324,8 +328,9 @@ class UsageHistory:
                     )
                     connection.executemany(
                         "INSERT INTO client_usage_hourly "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) "
-                        "ON CONFLICT(timestamp_hour, model_id, client_kind, client_id) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                        "ON CONFLICT(timestamp_hour, model_id, key_kind, key_id, "
+                        "client_ip) "
                         "DO UPDATE SET "
                         + ",".join(f"{f}={f}+excluded.{f}" for f in _FIELDS),
                         [(*key, *values) for key, values in client_batch.items()],
@@ -373,10 +378,11 @@ class UsageHistory:
         sums = ",".join(f"SUM({f})" for f in _FIELDS)
         try:
             return connection.execute(
-                f"SELECT client_kind, client_id, {sums} FROM client_usage_hourly "
+                f"SELECT key_kind, key_id, client_ip, {sums} "
+                "FROM client_usage_hourly "
                 "WHERE timestamp_hour >= ? AND timestamp_hour < ?"
                 + (" AND model_id = ?" if model else "")
-                + " GROUP BY client_kind, client_id",
+                + " GROUP BY key_kind, key_id, client_ip",
                 (start.timestamp(), end.timestamp(), *((model,) if model else ())),
             ).fetchall()
         except sqlite3.OperationalError as exc:
@@ -429,9 +435,19 @@ class UsageHistory:
             day_cursor += timedelta(days=1)
         days = {day: [0] * len(_FIELDS) for day in heatmap} if include_details else {}
         hourly: dict[int, list] = {}
-        clients: dict[tuple[str, str], list] = {}
-        for kind, client_id, *values in client_rows:
-            clients[(kind, client_id)] = values
+        # One query, three views: each key+IP pair, per key, and per IP.
+        pairs: dict[tuple[str, str, str], list] = {}
+        by_key: dict[tuple[str, str], list] = {}
+        by_ip: dict[str, list] = {}
+        for kind, key_id, ip, *values in client_rows:
+            pairs[(kind, key_id, ip)] = values
+            for target, group in ((by_key, (kind, key_id)), (by_ip, ip)):
+                target[group] = [
+                    a + b
+                    for a, b in zip(
+                        target.get(group, [0] * len(_FIELDS)), values, strict=True
+                    )
+                ]
         for hour, model_id, *values in rows:
             local = datetime.fromtimestamp(hour)
             day = local.date().isoformat()
@@ -471,13 +487,16 @@ class UsageHistory:
             ],
             # Rows recorded while per-client tracking was on stay visible after
             # it is turned off; ``by_client`` says whether new ones accrue.
-            "clients": sorted(
-                [
-                    {"client_kind": kind, "client_id": client_id, **_summary(value)}
-                    for (kind, client_id), value in clients.items()
-                ],
-                key=lambda item: item["total_tokens"],
-                reverse=True,
+            "clients": _ranked(
+                {"key_kind": kind, "key_id": key_id, "client_ip": ip, **_summary(v)}
+                for (kind, key_id, ip), v in pairs.items()
+            ),
+            "clients_by_key": _ranked(
+                {"key_kind": kind, "key_id": key_id, **_summary(v)}
+                for (kind, key_id), v in by_key.items()
+            ),
+            "clients_by_ip": _ranked(
+                {"client_ip": ip, **_summary(v)} for ip, v in by_ip.items()
             ),
         }
         if include_details:

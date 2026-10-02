@@ -75,12 +75,28 @@ test('recording switched off shows the settings pointer, not the unavailable war
     assert.equal(view.models[0], 'canonical model');
 });
 
-test('client rows label sub keys, IPs, and the unnamed main key', () => {
-    const view = component(async () => ({ok: true, json: async () => data}));
-    assert.equal(view.clientLabel({client_kind: 'sub_key', client_id: 'Editor'}), 'Editor');
-    assert.equal(view.clientKind({client_kind: 'sub_key', client_id: 'Editor'}), 'usage.client_sub_key');
-    assert.equal(view.clientLabel({client_kind: 'ip', client_id: '10.0.0.7'}), '10.0.0.7');
-    assert.equal(view.clientKind({client_kind: 'ip', client_id: '10.0.0.7'}), 'usage.client_ip');
-    assert.equal(view.clientLabel({client_kind: 'main_key', client_id: ''}), 'usage.client_main_key');
-    assert.equal(view.clientKind({client_kind: 'main_key', client_id: ''}), '');
+// Sandbox arrays have their own prototype; compare structure only.
+const plain = value => JSON.parse(JSON.stringify(value));
+
+test('client tabs: each key+IP pair, per key, and per IP', async () => {
+    const usage = {...data, by_client: true,
+        clients: [{key_kind: 'sub_key', key_id: 'Editor', client_ip: '10.0.0.7', requests: 2},
+                  {key_kind: 'none', key_id: '', client_ip: '127.0.0.1', requests: 1}],
+        clients_by_key: [{key_kind: 'sub_key', key_id: 'Editor', requests: 2},
+                         {key_kind: 'main_key', key_id: '', requests: 1},
+                         {key_kind: 'none', key_id: '', requests: 1}],
+        clients_by_ip: [{client_ip: '10.0.0.7', requests: 2}]};
+    const view = component(async () => ({ok: true, json: async () => usage}));
+    await view.load();
+    assert.equal(view.clientView, 'all');
+    assert.deepEqual(plain(view.clientRows().map(r => [r.label, r.detail])),
+        [['Editor', '· 10.0.0.7'], ['usage.client_no_key', '· 127.0.0.1']]);
+    view.clientView = 'key';
+    assert.deepEqual(plain(view.clientRows().map(r => [r.label, r.detail])),
+        [['Editor', 'usage.client_sub_key'], ['usage.client_main_key', ''], ['usage.client_no_key', '']]);
+    view.clientView = 'ip';
+    assert.deepEqual(plain(view.clientRows().map(r => [r.id, r.label, r.requests])), [['10.0.0.7', '10.0.0.7', 2]]);
+    // Older servers omit the grouped views; tabs degrade to empty, not errors.
+    view.data = {...data};
+    assert.deepEqual(plain(view.clientRows()), []);
 });

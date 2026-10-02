@@ -83,7 +83,7 @@ struct ClearHotCacheResponse: Codable, Sendable {
 }
 
 /// Hourly operational aggregates; contains no conversation data. Client
-/// labels (API key names or peer IPs) appear only when per-client tracking
+/// labels (API key names and peer IPs) appear only when per-client tracking
 /// has been turned on.
 struct UsageHistoryDTO: Decodable {
     /// `false` when recording is switched off in Settings; absent on older servers.
@@ -95,8 +95,11 @@ struct UsageHistoryDTO: Decodable {
     let heatmap: [UsageDayDTO]
     /// Whether new requests are attributed to clients; absent on older servers.
     let byClient: Bool?
-    /// Per-client breakdown for the range; absent on older servers.
+    /// Per-client breakdowns for the range: each key+IP pair, per key, and
+    /// per IP. All absent on older servers.
     let clients: [UsageClientDTO]?
+    let clientsByKey: [UsageClientDTO]?
+    let clientsByIp: [UsageClientDTO]?
 
     struct UsageTotalsDTO: Decodable {
         let modelId: String?
@@ -110,17 +113,19 @@ struct UsageHistoryDTO: Decodable {
     }
 
     struct UsageClientDTO: Decodable, Identifiable {
-        /// `sub_key`, `main_key`, or `ip`.
-        let clientKind: String
-        /// Sub key name or fingerprint, peer IP, or empty for the main key.
-        let clientId: String
+        /// `sub_key`, `main_key`, or `none`; absent in the per-IP view.
+        let keyKind: String?
+        /// Sub key name or fingerprint; empty for the main key and no key.
+        let keyId: String?
+        /// Peer address; absent in the per-key view.
+        let clientIp: String?
         let requests: Int
         let totalTokens: Int
         let promptTokens: Int
         let completionTokens: Int
         let cachedTokens: Int
         let generationTps: Double?
-        var id: String { "\(clientKind):\(clientId)" }
+        var id: String { "\(keyKind ?? ""):\(keyId ?? "")@\(clientIp ?? "")" }
     }
 
     struct UsageDayDTO: Decodable, Identifiable {

@@ -103,22 +103,23 @@ Turn on **Track usage per client** (web dashboard: Settings → Usage History;
 macOS app: Server → Usage History), set `usage.usage_by_client` to `true` in
 `settings.json`, or set `OMLX_USAGE_BY_CLIENT=1` at startup. It is off by
 default and applies immediately. Usage History then also shows a **Clients**
-breakdown, filtered by the selected range and model.
+breakdown, filtered by the selected range and model, with three tabs: **All**
+(each key and IP pair), **By key**, and **By IP**.
 
-Each request is attributed to one client:
+Each request records two labels:
 
-- **Sub key**: the name of the API sub key that authenticated the request. An
-  unnamed sub key is shown by the same 8-character fingerprint used in rejected
-  key log lines. Renaming a sub key starts a new series.
-- **Main key**: requests authenticated with the main API key.
-- **IP**: the peer address, when no key was checked (loopback without a key,
-  skipped verification, or unauthenticated inference). IPv4-mapped IPv6 peers
-  are shown as IPv4. `X-Forwarded-For` is not trusted, so behind a reverse proxy
-  requests group under the proxy's address; give each client its own sub key to
-  tell them apart.
+- **Key**: the name of the API sub key that authenticated the request, **Main
+  API key**, or **No key** when no key was checked (loopback without a key,
+  skipped verification, or unauthenticated inference). An unnamed sub key is
+  shown by the same 8-character fingerprint used in rejected-key log lines.
+  Renaming a sub key starts a new series.
+- **IP**: the peer address of every request, whichever key it used. IPv4-mapped
+  IPv6 peers are shown as IPv4. `X-Forwarded-For` is not trusted, so behind a
+  reverse proxy every request shows the proxy's address; give each client its
+  own sub key to tell them apart.
 
 Rows live in a separate `client_usage_hourly` table in the same database, one
-per model/client/hour, with the same metrics, 400-day retention, and their own
+per model/key/IP/hour, with the same metrics, 400-day retention, and their own
 4,096-aggregate pending bound (`dropped_client_requests`). Overflow drops only
 the per-client row; model totals are unaffected. Turning tracking off keeps
 recorded rows visible. The table is added without changing the schema version,
@@ -135,11 +136,12 @@ Multi-day ranges include today; Yesterday is the preceding calendar day. Omit
 `model` for all models. Filtering uses the exact canonical ID, even after unload
 or removal. OpenAI-compatible responses and endpoints are unchanged.
 
-The default JSON includes `totals`, `models`, `clients`, and `heatmap`, plus range,
+The default JSON includes `totals`, `models`, the three client views, and `heatmap`, plus range,
 retention, refresh, `enabled`, `by_client`, availability, and overflow metadata.
-Each `clients` entry has `client_kind` (`sub_key`, `main_key`, or `ip`),
-`client_id` (the key name, fingerprint, or address; empty for the main key), and
-the aggregate metrics below. Add `include_details=true`
+`clients` has one entry per key and IP pair, `clients_by_key` one per key, and
+`clients_by_ip` one per IP. Entries carry `key_kind` (`sub_key`, `main_key`, or
+`none`) and `key_id` (the sub key name or fingerprint; empty otherwise), and/or
+`client_ip`, plus the aggregate metrics below. Add `include_details=true`
 to also compute and return the full `daily` and `hourly` aggregates. The web and
 Mac panels use the compact default response. Aggregate metrics are
 `requests`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `cached_tokens`,

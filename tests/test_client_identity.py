@@ -105,26 +105,32 @@ def configured_server(tmp_path):
         history.close()
 
 
-def test_requests_attributed_to_key_or_peer(configured_server):
+def test_requests_record_key_and_peer(configured_server):
     client, history = configured_server
     auth = {"Authorization": "Bearer editor-key"}
-    assert client.get("/plain", headers=auth).json()["client"] == ["sub_key", "Editor"]
+    peer = "192.168.1.20"
+    assert client.get("/plain", headers=auth).json()["client"] == [
+        "sub_key",
+        "Editor",
+        peer,
+    ]
     assert client.get("/plain", headers={"x-api-key": "main-key"}).json()["client"] == [
         "main_key",
         "",
+        peer,
     ]
-    assert client.get("/open").json()["client"] == ["ip", "192.168.1.20"]
+    assert client.get("/open").json()["client"] == ["none", "", peer]
     assert client.get("/plain", headers={"x-api-key": "nope"}).status_code == 401
     assert client.get("/stream", headers=auth).text == "chunk"
 
     history.flush()
-    rows = {
-        (row["client_kind"], row["client_id"]): row
-        for row in history.query("today")["clients"]
-    }
-    assert rows[("sub_key", "Editor")]["requests"] == 2
-    assert rows[("sub_key", "Editor")]["prompt_tokens"] == 15
-    assert rows[("main_key", "")]["requests"] == 1
-    assert rows[("ip", "192.168.1.20")]["requests"] == 1
+    result = history.query("today")
+    keys = {(r["key_kind"], r["key_id"]): r for r in result["clients_by_key"]}
+    assert keys[("sub_key", "Editor")]["requests"] == 2
+    assert keys[("sub_key", "Editor")]["prompt_tokens"] == 15
+    assert keys[("main_key", "")]["requests"] == 1
+    assert keys[("none", "")]["requests"] == 1
     # The rejected request never reached accounting.
-    assert sum(row["requests"] for row in rows.values()) == 4
+    assert [(r["client_ip"], r["requests"]) for r in result["clients_by_ip"]] == [
+        (peer, 4)
+    ]

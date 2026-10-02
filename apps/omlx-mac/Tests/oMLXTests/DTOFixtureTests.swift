@@ -73,38 +73,38 @@ final class DTOFixtureTests: XCTestCase {
         XCTAssertEqual(usage.totals.requests, 0)
     }
 
-    func testUsageHistoryDecodesClientsAndToleratesOlderServers() throws {
+    func testUsageHistoryDecodesClientViewsAndToleratesOlderServers() throws {
+        let metrics = """
+        "requests": 2, "total_tokens": 120, "prompt_tokens": 100,
+        "completion_tokens": 20, "cached_tokens": 60, "generation_tps": null,
+        "cache_efficiency": 0.6
+        """
         let json = """
         {"available": true, "dropped_requests": 0, "by_client": false,
-         "totals": {"requests": 3, "total_tokens": 150, "prompt_tokens": 120,
-                    "completion_tokens": 30, "cached_tokens": 60,
-                    "generation_tps": 10.0, "cache_efficiency": 0.5},
-         "models": [], "heatmap": [],
-         "clients": [{"client_kind": "sub_key", "client_id": "Editor", "requests": 2,
-                      "total_tokens": 120, "prompt_tokens": 100,
-                      "completion_tokens": 20, "cached_tokens": 60,
-                      "generation_tps": null, "cache_efficiency": 0.6},
-                     {"client_kind": "main_key", "client_id": "", "requests": 1,
-                      "total_tokens": 30, "prompt_tokens": 20,
-                      "completion_tokens": 10, "cached_tokens": 0,
-                      "generation_tps": 5.0, "cache_efficiency": 0.0}]}
+         "totals": {\(metrics)}, "models": [], "heatmap": [],
+         "clients": [{"key_kind": "sub_key", "key_id": "Editor",
+                      "client_ip": "192.168.1.20", \(metrics)}],
+         "clients_by_key": [{"key_kind": "sub_key", "key_id": "Editor", \(metrics)},
+                            {"key_kind": "none", "key_id": "", \(metrics)}],
+         "clients_by_ip": [{"client_ip": "192.168.1.20", \(metrics)}]}
         """
         let usage = try Self.makeDecoder().decode(UsageHistoryDTO.self, from: Data(json.utf8))
         XCTAssertEqual(usage.byClient, false)
-        XCTAssertEqual(usage.clients?.map(\.id), ["sub_key:Editor", "main_key:"])
+        XCTAssertEqual(usage.clients?.map(\.id), ["sub_key:Editor@192.168.1.20"])
+        XCTAssertEqual(usage.clientsByKey?.map(\.id), ["sub_key:Editor@", "none:@"])
+        XCTAssertEqual(usage.clientsByIp?.first?.clientIp, "192.168.1.20")
+        XCTAssertNil(usage.clientsByIp?.first?.keyKind)
         XCTAssertNil(usage.clients?.first?.generationTps)
-        XCTAssertEqual(usage.clients?.last?.totalTokens, 30)
 
         let legacy = """
         {"available": true, "dropped_requests": 0,
-         "totals": {"requests": 0, "total_tokens": 0, "prompt_tokens": 0,
-                    "completion_tokens": 0, "cached_tokens": 0,
-                    "generation_tps": null, "cache_efficiency": 0.0},
-         "models": [], "heatmap": []}
+         "totals": {\(metrics)}, "models": [], "heatmap": []}
         """
         let old = try Self.makeDecoder().decode(UsageHistoryDTO.self, from: Data(legacy.utf8))
         XCTAssertNil(old.byClient)
         XCTAssertNil(old.clients)
+        XCTAssertNil(old.clientsByKey)
+        XCTAssertNil(old.clientsByIp)
     }
 
     // MARK: - oQ quantization
