@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('omlx/admin/static/js/usage.js', 'utf8');
 
-function component(fetch) {
+function component(fetch, lang = 'en') {
     const context = vm.createContext({fetch, AbortController, URLSearchParams, Intl,
-        window: {t: key => key}, document: {hidden: false}, setInterval, clearInterval});
+        window: {t: key => key}, document: {hidden: false, documentElement: {lang}}, setInterval, clearInterval});
     vm.runInContext(source, context);
     return context.usageHistory();
 }
@@ -99,4 +99,10 @@ test('client tabs: each key+IP pair, per key, and per IP', async () => {
     // Older servers omit the grouped views; tabs degrade to empty, not errors.
     view.data = {...data};
     assert.deepEqual(plain(view.clientRows()), []);
+});
+
+test('compact numbers follow the UI language, not the runtime locale', () => {
+    assert.equal(component(null, 'en').number(33320000), '33.3M');
+    assert.equal(component(null, 'ja').number(33320000), '3332万');
+    assert.equal(component(null, 'en_US').number(33320000), '33.3M');
 });
